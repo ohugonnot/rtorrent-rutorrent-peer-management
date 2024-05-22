@@ -1,14 +1,14 @@
 <?php
 // Configuration settings
 // refer to https://rtorrent-docs.readthedocs.io/en/latest/cmd-ref.html#term-d-accepting-seeders
-// this script must be launched all 5 minutes in cron  */5 * * * * php /path/to/file/index.php your_login your_password >> /cron.log
+// this script must be launched all 5 minutes in cron  */5 * * * * php /path/to/file/cron.php your_login your_password >> /cron.log
 $minElapsed = 300; // Minimum elapsed time in seconds before kick
 $minUploadSpeed = 100; // Minimum upload speed in ko/sec (under that value peer was kicked)
 $delta = 10;  // delta between maximum upload connection and actual upload connectin for begin to kick peer
 $url = 'http://localhost/rutorrent/plugins/httprpc/action.php';
 
-ini_set('display_errors', 1);
-error_reporting(E_ALL);
+//ini_set('display_errors', 1);
+//error_reporting(E_ALL);
 
 $login = $argv[1] ?? $_GET['login'] ?? 'your_login';
 $mdp = $argv[2] ?? $_GET['mdp'] ?? 'your_password';
@@ -95,7 +95,7 @@ foreach ($torrentsNoNamed as $hash => $values) {
     }
 }
 
-$total_peer_conntected = array_reduce($torrents, fn($sum, $torrent) => $sum + (int)$torrent['d.get_peers_connected='], 0);
+$total_peer_conntected = array_reduce($torrents, static fn($sum, $torrent) => $sum + (int)$torrent['d.get_peers_connected='], 0);
 echo "Total connection used $total_peer_conntected/" . $systemNamed['get_max_peers_seed'] . "\n";
 
 foreach ($torrents as $hash => $torrent) {
@@ -167,6 +167,9 @@ foreach ($torrents as $hash => $torrent) {
 }
 cleanCache();
 
+/**
+ * @throws JsonException
+ */
 function getCurl($url, $data, $login, $mdp): array
 {
     $posts = buildQuery($data);
@@ -177,7 +180,7 @@ function getCurl($url, $data, $login, $mdp): array
         CURLOPT_USERPWD => "$login:$mdp",
         CURLOPT_POSTFIELDS => $posts,
         CURLOPT_POST => true,
-        CURLOPT_SSL_VERIFYPEER => false,
+        CURLOPT_SSL_VERIFYPEER => true,
         CURLOPT_HTTPHEADER => ['Content-Type: application/x-www-form-urlencoded']
     ];
 
@@ -191,14 +194,17 @@ function getCurl($url, $data, $login, $mdp): array
         return ['success' => false];
     }
 
-    return json_decode($response, true);
+    return json_decode($response, true, 512, JSON_THROW_ON_ERROR);
 }
 
+/**
+ * @throws JsonException
+ */
 function getDataForPeer($peer): array
 {
     global $cacheFile;
     if (file_exists($cacheFile)) {
-        $peersData = json_decode(file_get_contents($cacheFile), true);
+        $peersData = json_decode(file_get_contents($cacheFile), true, 512, JSON_THROW_ON_ERROR);
     } else {
         $peersData = [];
     }
@@ -206,11 +212,14 @@ function getDataForPeer($peer): array
     return $peersData[$peer['id']] ?? [];
 }
 
+/**
+ * @throws JsonException
+ */
 function setDataForPeer($peer): void
 {
     global $cacheFile;
     if (file_exists($cacheFile)) {
-        $peersData = json_decode(file_get_contents($cacheFile), true);
+        $peersData = json_decode(file_get_contents($cacheFile), true, 512, JSON_THROW_ON_ERROR);
     } else {
         $peersData = [];
     }
@@ -220,32 +229,38 @@ function setDataForPeer($peer): void
         $peersData[$peer['id']]["date"] = time();
     }
 
-    file_put_contents($cacheFile, json_encode($peersData));
+    file_put_contents($cacheFile, json_encode($peersData, JSON_THROW_ON_ERROR));
 }
 
+/**
+ * @throws JsonException
+ */
 function cleanCache(): void
 {
     global $cacheFile;
     if (file_exists($cacheFile)) {
-        $peersData = json_decode(file_get_contents($cacheFile), true);
+        $peersData = json_decode(file_get_contents($cacheFile), true, 512, JSON_THROW_ON_ERROR);
         foreach ($peersData as $peerId => $peer) {
             if (time() - $peer['date'] >= 86400) {
                 unset($peersData[$peerId]);
             }
         }
-        file_put_contents($cacheFile, json_encode($peersData));
+        file_put_contents($cacheFile, json_encode($peersData, JSON_THROW_ON_ERROR));
     }
 }
 
+/**
+ * @throws JsonException
+ */
 function removeCache($peer): void
 {
     global $cacheFile;
     if (file_exists($cacheFile)) {
-        $peersData = json_decode(file_get_contents($cacheFile), true);
+        $peersData = json_decode(file_get_contents($cacheFile), true, 512, JSON_THROW_ON_ERROR);
         if (isset($peersData[$peer["id"]])) {
             unset($peersData[$peer["id"]]);
         }
-        file_put_contents($cacheFile, json_encode($peersData));
+        file_put_contents($cacheFile, json_encode($peersData, JSON_THROW_ON_ERROR));
     }
 }
 

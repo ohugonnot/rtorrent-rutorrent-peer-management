@@ -18,7 +18,7 @@ $cacheFile = "peers_cache_$login.json";
 
 // Récupération des informations système
 // take on action.php in http://localhost/rutorrent/plugins/httprpc/action.php check if is the same for you
-$cmds = [
+$cmds = array(
     "get_check_hash", "get_bind", "get_dht_port", "get_directory", "get_download_rate",
     "get_hash_interval", "get_hash_max_tries", "get_hash_read_ahead", "get_http_cacert", "get_http_capath",
     "get_http_proxy", "get_ip", "get_max_downloads_div", "get_max_downloads_global", "get_max_file_size",
@@ -29,7 +29,7 @@ $cmds = [
     "get_scgi_dont_route", "get_send_buffer_size", "get_session", "get_session_lock", "get_session_on_completion",
     "get_split_file_size", "get_split_suffix", "get_timeout_safe_sync", "get_timeout_sync", "get_tracker_numwant",
     "get_use_udp_trackers", "get_max_uploads_div", "get_max_open_sockets"
-];
+);
 $data = ['mode' => 'stg'];
 $system = getCurl($url, $data, $login, $mdp);
 $systemNamed = [];
@@ -85,8 +85,7 @@ $cmds = array(
     "d.get_custom1=", "d.get_peers_accounted=", "d.get_peers_not_connected=", "d.get_peers_connected=", "d.get_peers_complete=",
     "d.get_left_bytes=", "d.get_priority=", "d.get_state_changed=", "d.get_skip_total=", "d.get_hashing=",
     "d.get_chunks_hashed=", "d.get_base_path=", "d.get_creation_date=", "d.get_tracker_size=", "d.is_active=",
-    "d.get_message=", "d.get_custom2=", "d.get_free_diskspace=", "d.is_private=", "d.is_multi_file=",
-    "d.peers_max="
+    "d.get_message=", "d.get_custom2=", "d.get_free_diskspace=", "d.is_private=", "d.is_multi_file="
 );
 $cmds = array_merge($cmds,$data['cmd']);
 foreach ($torrentsNoNamed as $hash => $values) {
@@ -95,6 +94,7 @@ foreach ($torrentsNoNamed as $hash => $values) {
         $torrents[$hash][$cmds[$key - $ecart] ?? "unknow$key"] = $value;
     }
 }
+
 $total_peer_conntected = array_reduce($torrents, fn($sum, $torrent) => $sum + (int)$torrent['d.get_peers_connected='], 0);
 echo "Total connection used $total_peer_conntected/" . $systemNamed['get_max_peers_seed'] . "\n";
 

@@ -4,11 +4,12 @@
 // this script must be launched all 5 minutes in cron  */5 * * * * php /path/to/file/cron.php your_login your_password >> /cron.log
 $minElapsed = 300; // Minimum elapsed time in seconds before kick
 $minUploadSpeed = 100; // Minimum upload speed in ko/sec (under that value peer was kicked)
+$minDownloadSpeed = 100;  // Minimum download speed in ko/sec (under that value peer was kicked)
 $delta = 10;  // delta between maximum upload connection and actual upload connectin for begin to kick peer
 $url = 'http://localhost/rutorrent/plugins/httprpc/action.php';
 
-//ini_set('display_errors', 1);
-//error_reporting(E_ALL);
+ini_set('display_errors', 1);
+error_reporting(E_ALL);
 
 $login = $argv[1] ?? $_GET['login'] ?? 'your_login';
 $mdp = $argv[2] ?? $_GET['mdp'] ?? 'your_password';
@@ -102,7 +103,11 @@ foreach ($torrents as $hash => $torrent) {
     $peers_id_a_bannir = [];
     $peers_a_bannir = [];
 
-    if ($torrent['d.complete='] === "1" && $torrent['d.is_active='] === "1" && (int)$torrent['d.get_peers_connected='] > 0) {
+    $is_leech_torrent = $torrent['d.complete='] === "0" && $torrent['d.is_active='] === "1" && (int)$torrent['d.get_peers_connected='] > 0;
+    $is_seed_torrent = $torrent['d.complete='] === "1" && $torrent['d.is_active='] === "1" && (int)$torrent['d.get_peers_connected='] > 0;
+
+    // pour tous les torrents en seed
+    if ($is_leech_torrent || $is_seed_torrent) {
         $data = [
             'mode' => 'prs',
             'hash' => $hash,
@@ -135,21 +140,43 @@ foreach ($torrents as $hash => $torrent) {
             $torrent_has_max_peer = (int)$torrent['d.get_peers_connected='] >= ((int)$torrent['d.peers_max='] - $delta);
             $system_has_max_peer = $total_peer_conntected >= ((int)$systemNamed['get_max_peers_seed'] - $delta);
 
+            // kick les peers sur tous les torrents qd on atteinds le maximum de connexion de la config en se basant sur les quantités downloaded ou uploaded pendant la période de temps
             if ($elapsed > $minElapsed && ($torrent_has_max_peer || $system_has_max_peer)) {
-                $vitesseMoyenne = ((float)$peer['uploaded'] - (float)$cachePeer['first_uploaded']) / $elapsed;
-                if ($vitesseMoyenne < $minUploadSpeed) {
-                    $peers_id_a_bannir[] = $peer['id'];
-                    $peers_a_bannir[] = $peer;
-                    removeCache($peer);
+                if ($is_seed_torrent) {
+                    $vitesseMoyenne = ((float)$peer['uploaded'] - (float)$cachePeer['first_uploaded']) / $elapsed;
+                    if ($vitesseMoyenne < $minUploadSpeed) {
+                        $peers_id_a_bannir[] = $peer['id'];
+                        $peers_a_bannir[] = $peer;
+                        removeCache($peer);
+                    }
+                }
+                if ($is_leech_torrent) {
+                    $vitesseMoyenne = ((float)$peer['downloaded'] - (float)$cachePeer['downloaded']) / $elapsed;
+                    if ($vitesseMoyenne < $minDownloadSpeed) {
+                        $peers_id_a_bannir[] = $peer['id'];
+                        $peers_a_bannir[] = $peer;
+                        removeCache($peer);
+                    }
                 }
             }
 
+            // kick les peers sur tous les torrents qd on atteinds le maximum de connexion de la config en se basant sur la moyenne des vitesses pendant a chaque interval de temps
             if ($elapsed > $minElapsed && $system_has_max_peer) {
-                $averageUps = calculateAverage($peer['ups']);
-                if ($averageUps < $minUploadSpeed*1024) {
-                    $peers_id_a_bannir[] = $peer['id'];
-                    $peers_a_bannir[] = $peer;
-                    removeCache($peer);
+                if ($is_seed_torrent) {
+                    $averageUps = calculateAverage($peer['ups']);
+                    if ($averageUps < $minUploadSpeed) {
+                        $peers_id_a_bannir[] = $peer['id'];
+                        $peers_a_bannir[] = $peer;
+                        removeCache($peer);
+                    }
+                }
+                if ($is_leech_torrent) {
+                    $averageDls = calculateAverage($peer['dls']);
+                    if ($averageDls < $minDownloadSpeed) {
+                        $peers_id_a_bannir[] = $peer['id'];
+                        $peers_a_bannir[] = $peer;
+                        removeCache($peer);
+                    }
                 }
             }
         }

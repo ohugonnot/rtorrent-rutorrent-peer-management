@@ -1,6 +1,6 @@
 # Peer Speed Manager Script for rTorrent + ruTorrent
 
-This PHP script interacts with the rTorrent API to manage peers dynamically based on their download and upload speeds. It retrieves system settings, fetches the list of torrents, and analyzes peer performance to ensure optimal seeding and leeching. It's possible to make a Rtorrent plugin with this code if your a motivate. This script automatically disconnects peers with low upload or download rates to reserve available slots for faster peers.
+This PHP script interacts with the rTorrent API to manage peers dynamically based on their download and upload speeds. It retrieves system settings, fetches the list of torrents, and analyzes peer performance to ensure optimal seeding and leeching. It's possible to make a Rutorrent plugin with this code. This script automatically disconnects peers with low upload or download rates to reserve available slots for faster peers.
 
 ## Features
 - **Peer Performance Monitoring**: Continuously monitors peers' upload and download speeds.

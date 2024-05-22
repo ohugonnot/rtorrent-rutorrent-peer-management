@@ -97,6 +97,7 @@ foreach ($torrentsNoNamed as $hash => $values) {
 }
 
 $total_peer_conntected = array_reduce($torrents, static fn($sum, $torrent) => $sum + (int)$torrent['d.get_peers_connected='], 0);
+$system_has_max_peer = $total_peer_conntected >= ((int)$systemNamed['get_max_peers_seed'] - $delta);
 echo "Total connection used $total_peer_conntected/" . $systemNamed['get_max_peers_seed'] . "\n";
 
 foreach ($torrents as $hash => $torrent) {
@@ -108,6 +109,9 @@ foreach ($torrents as $hash => $torrent) {
 
     // pour tous les torrents en seed
     if ($is_leech_torrent || $is_seed_torrent) {
+        $torrent_has_max_peer = (int)$torrent['d.get_peers_connected='] >= ((int)$torrent['d.peers_max='] - $delta);
+        echo "Connexion used for ".$torrent['d.get_name=']." ".$torrent['d.get_peers_connected=']."/" . $torrent['d.peers_max='] . "\n";
+
         $data = [
             'mode' => 'prs',
             'hash' => $hash,
@@ -129,6 +133,7 @@ foreach ($torrents as $hash => $torrent) {
             } else {
                 $cachePeer = $peer;
                 $cachePeer['first_uploaded'] = $peer['uploaded'] ?? 0;
+                $cachePeer['first_downloaded'] = $peer['downloaded'] ?? 0;
                 $cachePeer['ups'] = [$peer['up']];
                 $cachePeer['dls'] = [$peer['dl']];
                 $cachePeer['date'] = time();
@@ -136,12 +141,10 @@ foreach ($torrents as $hash => $torrent) {
             setDataForPeer($cachePeer);
 
             $now = time();
-            $elapsed = $now - $cachePeer['date'];
-            $torrent_has_max_peer = (int)$torrent['d.get_peers_connected='] >= ((int)$torrent['d.peers_max='] - $delta);
-            $system_has_max_peer = $total_peer_conntected >= ((int)$systemNamed['get_max_peers_seed'] - $delta);
-
+            $elapsed = $now - (int)$cachePeer['date'];
+            $isTime = $elapsed > $minElapsed;
             // kick les peers sur tous les torrents qd on atteinds le maximum de connexion de la config en se basant sur les quantités downloaded ou uploaded pendant la période de temps
-            if ($elapsed > $minElapsed && ($torrent_has_max_peer || $system_has_max_peer)) {
+            if ($isTime && ($torrent_has_max_peer || $system_has_max_peer)) {
                 if ($is_seed_torrent) {
                     $vitesseMoyenne = ((float)$peer['uploaded'] - (float)$cachePeer['first_uploaded']) / $elapsed;
                     if ($vitesseMoyenne < $minUploadSpeed) {
@@ -161,7 +164,7 @@ foreach ($torrents as $hash => $torrent) {
             }
 
             // kick les peers sur tous les torrents qd on atteinds le maximum de connexion de la config en se basant sur la moyenne des vitesses pendant a chaque interval de temps
-            if ($elapsed > $minElapsed && $system_has_max_peer) {
+            if ($isTime && $system_has_max_peer) {
                 if ($is_seed_torrent) {
                     $averageUps = calculateAverage($peer['ups']);
                     if ($averageUps < $minUploadSpeed) {
@@ -179,6 +182,24 @@ foreach ($torrents as $hash => $torrent) {
                     }
                 }
             }
+
+            // kick 0 upload speed
+            if ($isTime && $is_seed_torrent) {
+                $uploaded = (float)$peer['uploaded'] - (float)$cachePeer['first_uploaded'];
+                if ($uploaded === 0.0) {
+                    $peers_id_a_bannir[] = $peer['id'];
+                    $peers_a_bannir[] = $peer;
+                    removeCache($peer);
+                }
+            }
+            if ($isTime && $is_leech_torrent) {
+                $downloaded = (float)$peer['downloaded'] - (float)$cachePeer['first_downloaded'];
+                if ($downloaded === 0.0) {
+                    $peers_id_a_bannir[] = $peer['id'];
+                    $peers_a_bannir[] = $peer;
+                    removeCache($peer);
+                }
+            }
         }
 
         if (!empty($peers_id_a_bannir)) {
@@ -187,8 +208,8 @@ foreach ($torrents as $hash => $torrent) {
                 'hash' => $hash,
                 'v' => $peers_id_a_bannir,
             ];
-            $test = getCurl($url, $data, $login, $mdp);
-            var_dump("kick torrent" . $torrent['d.name='], $peers_a_bannir);
+            $kicks = getCurl($url, $data, $login, $mdp);
+            echo  "kick torrent " . $torrent['d.get_name=']." ".implode(", ",$peers_id_a_bannir);
         }
     }
 }

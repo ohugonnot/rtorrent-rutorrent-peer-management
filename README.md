@@ -1,6 +1,6 @@
-# Peer Management Script for rTorrent
+# Peer Speed Management Script for rTorrent
 
-This PHP script interacts with the rTorrent API to manage peers dynamically based on their download and upload speeds. It retrieves system settings, fetches the list of torrents, and analyzes peer performance to ensure optimal seeding and leeching. It's possible to make a Rtorrent plugin with this code if your a motivate
+This PHP script interacts with the rTorrent API to manage peers dynamically based on their download and upload speeds. It retrieves system settings, fetches the list of torrents, and analyzes peer performance to ensure optimal seeding and leeching. It's possible to make a Rtorrent plugin with this code if your a motivate. This script is designed to manage torrent download speeds in rTorrent based on the upload speed of peers. It periodically checks the upload speed of peers connected to seeding torrents and kicks slow peers to maintain optimal download speeds.
 
 ## Features
 - **Peer Performance Monitoring**: Continuously monitors peers' upload and download speeds.
@@ -8,26 +8,14 @@ This PHP script interacts with the rTorrent API to manage peers dynamically base
 - **Customizable**: Easily adjustable parameters to suit different rTorrent setups and requirements.
 - **Cache Management**: Uses a JSON file to cache peer data for efficient access and management.
 - **Daily Cache Cleanup**: Removes old peer data to ensure the cache remains up-to-date.
+- Automatically kicks slow peers to maintain optimal download speeds
+- Supports command-line usage with login and password
+- Utilizes cURL to interact with the rTorrent API
 
 ## Requirements
 - PHP 7.4+
 - cURL extension enabled
 - rTorrent with HTTPRPC plugin enabled
-
-# Rtorrent Speed Manager
-
-This script is designed to manage torrent download speeds in rTorrent based on the upload speed of peers. It periodically checks the upload speed of peers connected to seeding torrents and kicks slow peers to maintain optimal download speeds.
-
-### Features
-
-- Automatically kicks slow peers to maintain optimal download speeds
-- Supports command-line usage with login and password
-- Utilizes cURL to interact with the rTorrent API
-
-### Requirements
-
-- PHP 7.0 or higher
-- cURL extension enabled
 
 ### Usage
 

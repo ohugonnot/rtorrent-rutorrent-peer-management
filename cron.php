@@ -140,17 +140,28 @@ foreach ($torrents as $hash => $torrent) {
             }
             setDataForPeer($cachePeer);
 
-            $now = time();
+            $now = time(); 
             $elapsed = $now - (int)$cachePeer['date'];
             $isTime = $elapsed > $minElapsed;
+            if(!$isTime) {
+                continue;
+            }
             // kick les peers sur tous les torrents qd on atteinds le maximum de connexion de la config en se basant sur les quantités downloaded ou uploaded pendant la période de temps
-            if ($isTime && ($torrent_has_max_peer || $system_has_max_peer)) {
+            if ($torrent_has_max_peer || $system_has_max_peer) {
                 if ($is_seed_torrent) {
                     $vitesseMoyenne = ((float)$peer['uploaded'] - (float)$cachePeer['first_uploaded']) / $elapsed;
                     if ($vitesseMoyenne < $minUploadSpeed) {
                         $peers_id_a_bannir[] = $peer['id'];
                         $peers_a_bannir[] = $peer;
                         removeCache($peer);
+                        continue;
+                    }
+                    $averageUps = calculateAverage($peer['ups']);
+                    if ($averageUps < $minUploadSpeed) {
+                        $peers_id_a_bannir[] = $peer['id'];
+                        $peers_a_bannir[] = $peer;
+                        removeCache($peer);
+                        continue;
                     }
                 }
                 if ($is_leech_torrent) {
@@ -159,40 +170,29 @@ foreach ($torrents as $hash => $torrent) {
                         $peers_id_a_bannir[] = $peer['id'];
                         $peers_a_bannir[] = $peer;
                         removeCache($peer);
+                        continue;
                     }
-                }
-            }
-
-            // kick les peers sur tous les torrents qd on atteinds le maximum de connexion de la config en se basant sur la moyenne des vitesses pendant a chaque interval de temps
-            if ($isTime && $system_has_max_peer) {
-                if ($is_seed_torrent) {
-                    $averageUps = calculateAverage($peer['ups']);
-                    if ($averageUps < $minUploadSpeed) {
-                        $peers_id_a_bannir[] = $peer['id'];
-                        $peers_a_bannir[] = $peer;
-                        removeCache($peer);
-                    }
-                }
-                if ($is_leech_torrent) {
                     $averageDls = calculateAverage($peer['dls']);
                     if ($averageDls < $minDownloadSpeed) {
                         $peers_id_a_bannir[] = $peer['id'];
                         $peers_a_bannir[] = $peer;
                         removeCache($peer);
+                        continue;
                     }
                 }
             }
 
             // kick 0 upload speed
-            if ($isTime && $is_seed_torrent) {
+            if ($is_seed_torrent) {
                 $uploaded = (float)$peer['uploaded'] - (float)$cachePeer['first_uploaded'];
                 if ($uploaded === 0.0) {
                     $peers_id_a_bannir[] = $peer['id'];
                     $peers_a_bannir[] = $peer;
                     removeCache($peer);
+                    continue;
                 }
             }
-            if ($isTime && $is_leech_torrent) {
+            if ($is_leech_torrent) {
                 $downloaded = (float)$peer['downloaded'] - (float)$cachePeer['first_downloaded'];
                 if ($downloaded === 0.0) {
                     $peers_id_a_bannir[] = $peer['id'];
@@ -209,7 +209,7 @@ foreach ($torrents as $hash => $torrent) {
                 'v' => $peers_id_a_bannir,
             ];
             $kicks = getCurl($url, $data, $login, $mdp);
-            echo  "kick torrent " . $torrent['d.get_name=']." ".implode(", ",$peers_id_a_bannir);
+            echo  "kick torrent " . $torrent['d.get_name=']." ".implode(", ",$peers_id_a_bannir)."\n";
         }
     }
 }

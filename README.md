@@ -38,7 +38,7 @@ This script is designed to manage torrent download speeds in rTorrent based on t
     ```bash
     php index.php yourlogin yourpassword
 
-    // or add it in a cron => crontab -e
+    # or add it in a cron => crontab -e
     */5 * * * * php /path/to/file/index.php your_login your_password >> /cron.log
     ```
 

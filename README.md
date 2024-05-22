@@ -32,16 +32,16 @@ This script is designed to manage torrent download speeds in rTorrent based on t
 ### Usage
 
 1. Before running the script, make sure you have rTorrent running and accessible via its HTTP RPC plugin.
-2. Edit the script `index.php` and replace `'yourlogin'` and `'yourpassword'` with your rTorrent login credentials.
+2. Edit the script `cron.php` and replace `'yourlogin'` and `'yourpassword'` with your rTorrent login credentials.
 3. Run the script from the command line with login and password or accès to id directly with a cron on server:
 
     ```bash
-    php index.php yourlogin yourpassword
+    php cron.php yourlogin yourpassword
 
     # or add it in a cron => crontab -e
-    */5 * * * * php /path/to/file/index.php your_login your_password >> /cron.log
+    */5 * * * * php /path/to/file/cron.php your_login your_password >> /cron.log
     ```
 
 ### Configuration
 
-- You can adjust the settings in the `index.php` file to customize the behavior of the script according to your preferences.
+- You can adjust the settings in the `cron.php` file to customize the behavior of the script according to your preferences.

@@ -13,7 +13,7 @@ This PHP script interacts with the rTorrent API to manage peers dynamically base
 ## Requirements
 - PHP 7.4+
 - cURL extension enabled
-- rTorrent with last HTTPRPC plugin enabled
+- ruTorrent with last HTTPRPC plugin enabled
 
 ### Usage
 

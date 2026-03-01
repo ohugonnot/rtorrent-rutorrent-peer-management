@@ -5,17 +5,30 @@
 $minElapsed = 300; // Minimum elapsed time in seconds before kick
 $minUploadSpeed = 100; // Minimum upload speed in ko/sec (under that value peer was kicked)
 $minDownloadSpeed = 100;  // Minimum download speed in ko/sec (under that value peer was kicked)
-$delta = 10;  // delta between maximum upload connection and actual upload connectin for begin to kick peer
+$delta = 10;  // delta between maximum upload connection and actual upload connection for begin to kick peer
 $url = 'http://localhost/rutorrent/plugins/httprpc/action.php';
 
 ini_set('display_errors', 1);
 error_reporting(E_ALL);
 
-$login = $argv[1] ?? $_GET['login'] ?? 'your_login';
-$mdp = $argv[2] ?? $_GET['mdp'] ?? 'your_password';
+// Credentials: CLI args > env vars > defaults
+// Prefer env vars over CLI args to avoid exposing credentials in `ps aux`
+// Example: export RTORRENT_LOGIN=mylogin RTORRENT_PASSWORD=mypassword
+$login = $argv[1] ?? getenv('RTORRENT_LOGIN') ?: 'your_login';
+$mdp   = $argv[2] ?? getenv('RTORRENT_PASSWORD') ?: 'your_password';
 
-global $cacheFile;
 $cacheFile = "peers_cache_$login.json";
+
+// Load peer cache once into memory — written back once at the end
+$peersCache = [];
+if (file_exists($cacheFile)) {
+    try {
+        $peersCache = json_decode(file_get_contents($cacheFile), true, 512, JSON_THROW_ON_ERROR);
+    } catch (JsonException $e) {
+        echo "Warning: could not read cache file, starting fresh: " . $e->getMessage() . "\n";
+        $peersCache = [];
+    }
+}
 
 // Récupération des informations système
 // take on action.php in http://localhost/rutorrent/plugins/httprpc/action.php check if is the same for you
@@ -31,8 +44,15 @@ $cmds = array(
     "get_split_file_size", "get_split_suffix", "get_timeout_safe_sync", "get_timeout_sync", "get_tracker_numwant",
     "get_use_udp_trackers", "get_max_uploads_div", "get_max_open_sockets"
 );
-$data = ['mode' => 'stg'];
-$system = getCurl($url, $data, $login, $mdp);
+
+try {
+    $data = ['mode' => 'stg'];
+    $system = getCurl($url, $data, $login, $mdp);
+} catch (Exception $e) {
+    echo "Fatal: could not reach rTorrent API: " . $e->getMessage() . "\n";
+    exit(1);
+}
+
 $systemNamed = [];
 $ecart = count($system) - count($cmds);
 foreach ($system as $k => $value) {
@@ -74,7 +94,14 @@ $data = [
     ]
 ];
 
-$response = getCurl($url, $data, $login, $mdp);
+try {
+    $response = getCurl($url, $data, $login, $mdp);
+} catch (Exception $e) {
+    echo "Fatal: could not fetch torrent list: " . $e->getMessage() . "\n";
+    saveCache($cacheFile, $peersCache);
+    exit(1);
+}
+
 $torrentsNoNamed = $response['t'] ?? [];
 $torrents = [];
 
@@ -88,107 +115,94 @@ $cmds = array(
     "d.get_chunks_hashed=", "d.get_base_path=", "d.get_creation_date=", "d.get_tracker_size=", "d.is_active=",
     "d.get_message=", "d.get_custom2=", "d.get_free_diskspace=", "d.is_private=", "d.is_multi_file="
 );
-$cmds = array_merge($cmds,$data['cmd']);
+$cmds = array_merge($cmds, $data['cmd']);
 foreach ($torrentsNoNamed as $hash => $values) {
     $ecart = count($values) - count($cmds);
-    foreach($values as $key => $value) {
+    foreach ($values as $key => $value) {
         $torrents[$hash][$cmds[$key - $ecart] ?? "unknow$key"] = $value;
     }
 }
 
-$total_peer_conntected = array_reduce($torrents, static fn($sum, $torrent) => $sum + (int)$torrent['d.get_peers_connected='], 0);
-$system_has_max_peer = $total_peer_conntected >= ((int)$systemNamed['get_max_peers_seed'] - $delta);
-echo "Total connection used $total_peer_conntected/" . $systemNamed['get_max_peers_seed'] . "\n";
+$total_peer_connected = array_reduce($torrents, static fn($sum, $torrent) => $sum + (int)$torrent['d.get_peers_connected='], 0);
+$system_has_max_peer = $total_peer_connected >= ((int)$systemNamed['get_max_peers_seed'] - $delta);
+echo "Total connection used $total_peer_connected/" . $systemNamed['get_max_peers_seed'] . "\n";
 
 foreach ($torrents as $hash => $torrent) {
     $peers_id_a_bannir = [];
     $peers_a_bannir = [];
 
     $is_leech_torrent = $torrent['d.complete='] === "0" && $torrent['d.is_active='] === "1" && (int)$torrent['d.get_peers_connected='] > 0;
-    $is_seed_torrent = $torrent['d.complete='] === "1" && $torrent['d.is_active='] === "1" && (int)$torrent['d.get_peers_connected='] > 0;
+    $is_seed_torrent  = $torrent['d.complete='] === "1" && $torrent['d.is_active='] === "1" && (int)$torrent['d.get_peers_connected='] > 0;
 
-    // pour tous les torrents en seed
     if ($is_leech_torrent || $is_seed_torrent) {
         $torrent_has_max_peer = (int)$torrent['d.get_peers_connected='] >= ((int)$torrent['d.peers_max='] - $delta);
-        echo "Connexion used for ".$torrent['d.get_name=']." ".$torrent['d.get_peers_connected=']."/" . $torrent['d.peers_max='] . "\n";
+        echo "Connexion used for " . $torrent['d.get_name='] . " " . $torrent['d.get_peers_connected='] . "/" . $torrent['d.peers_max='] . "\n";
 
-        $data = [
-            'mode' => 'prs',
-            'hash' => $hash,
-        ];
-        $prs = getCurl($url, $data, $login, $mdp);
+        try {
+            $prs = getCurl($url, ['mode' => 'prs', 'hash' => $hash], $login, $mdp);
+        } catch (Exception $e) {
+            echo "Warning: could not fetch peers for " . $torrent['d.get_name='] . ": " . $e->getMessage() . "\n";
+            continue;
+        }
+
         foreach ($prs as $pr) {
             $peer = [
                 "downloaded" => (int)$pr[7] / 1024,
-                "uploaded" => (int)$pr[8] / 1024,
-                "dl" => (int)$pr[9] / 1024,
-                "up" => (int)$pr[10] / 1024,
-                "ip" => $pr[1],
-                "id" => $pr[0],
+                "uploaded"   => (int)$pr[8] / 1024,
+                "dl"         => (int)$pr[9] / 1024,
+                "up"         => (int)$pr[10] / 1024,
+                "ip"         => $pr[1],
+                "id"         => $pr[0],
             ];
-            $cachePeer = getDataForPeer($peer);
+
+            $cachePeer = $peersCache[$peer['id']] ?? [];
             if (!empty($cachePeer)) {
                 $cachePeer['ups'][] = $peer['up'];
                 $cachePeer['dls'][] = $peer['dl'];
             } else {
-                $cachePeer = $peer;
-                $cachePeer['first_uploaded'] = $peer['uploaded'] ?? 0;
+                $cachePeer                     = $peer;
+                $cachePeer['first_uploaded']   = $peer['uploaded'] ?? 0;
                 $cachePeer['first_downloaded'] = $peer['downloaded'] ?? 0;
-                $cachePeer['ups'] = [$peer['up']];
-                $cachePeer['dls'] = [$peer['dl']];
-                $cachePeer['date'] = time();
+                $cachePeer['ups']              = [$peer['up']];
+                $cachePeer['dls']              = [$peer['dl']];
+                $cachePeer['date']             = time();
             }
-            setDataForPeer($cachePeer);
+            $peersCache[$peer['id']] = $cachePeer;
 
-            $now = time(); 
-            $elapsed = $now - (int)$cachePeer['date'];
-            $isTime = $elapsed > $minElapsed;
-            if(!$isTime) {
+            $elapsed = time() - (int)$cachePeer['date'];
+            if ($elapsed <= $minElapsed) {
                 continue;
             }
-            // kick les peers sur tous les torrents qd on atteinds le maximum de connexion de la config en se basant sur les quantités downloaded ou uploaded pendant la période de temps
+
+            // kick slow peers when reaching max connection capacity
             if ($torrent_has_max_peer || $system_has_max_peer) {
                 if ($is_seed_torrent) {
                     $vitesseMoyenne = ((float)$peer['uploaded'] - (float)$cachePeer['first_uploaded']) / $elapsed;
-                    if ($vitesseMoyenne < $minUploadSpeed) {
+                    if ($vitesseMoyenne < $minUploadSpeed || calculateAverage($cachePeer['ups']) < $minUploadSpeed) {
                         $peers_id_a_bannir[] = $peer['id'];
-                        $peers_a_bannir[] = $peer;
-                        removeCache($peer);
-                        continue;
-                    }
-                    $averageUps = calculateAverage($peer['ups']);
-                    if ($averageUps < $minUploadSpeed) {
-                        $peers_id_a_bannir[] = $peer['id'];
-                        $peers_a_bannir[] = $peer;
-                        removeCache($peer);
+                        $peers_a_bannir[]    = $peer;
+                        unset($peersCache[$peer['id']]);
                         continue;
                     }
                 }
                 if ($is_leech_torrent) {
                     $vitesseMoyenne = ((float)$peer['downloaded'] - (float)$cachePeer['downloaded']) / $elapsed;
-                    if ($vitesseMoyenne < $minDownloadSpeed) {
+                    if ($vitesseMoyenne < $minDownloadSpeed || calculateAverage($cachePeer['dls']) < $minDownloadSpeed) {
                         $peers_id_a_bannir[] = $peer['id'];
-                        $peers_a_bannir[] = $peer;
-                        removeCache($peer);
-                        continue;
-                    }
-                    $averageDls = calculateAverage($peer['dls']);
-                    if ($averageDls < $minDownloadSpeed) {
-                        $peers_id_a_bannir[] = $peer['id'];
-                        $peers_a_bannir[] = $peer;
-                        removeCache($peer);
+                        $peers_a_bannir[]    = $peer;
+                        unset($peersCache[$peer['id']]);
                         continue;
                     }
                 }
             }
 
-            // kick 0 upload speed
+            // kick peers with zero transfer after observation window
             if ($is_seed_torrent) {
                 $uploaded = (float)$peer['uploaded'] - (float)$cachePeer['first_uploaded'];
                 if ($uploaded === 0.0) {
                     $peers_id_a_bannir[] = $peer['id'];
-                    $peers_a_bannir[] = $peer;
-                    removeCache($peer);
+                    $peers_a_bannir[]    = $peer;
+                    unset($peersCache[$peer['id']]);
                     continue;
                 }
             }
@@ -196,123 +210,73 @@ foreach ($torrents as $hash => $torrent) {
                 $downloaded = (float)$peer['downloaded'] - (float)$cachePeer['first_downloaded'];
                 if ($downloaded === 0.0) {
                     $peers_id_a_bannir[] = $peer['id'];
-                    $peers_a_bannir[] = $peer;
-                    removeCache($peer);
+                    $peers_a_bannir[]    = $peer;
+                    unset($peersCache[$peer['id']]);
                 }
             }
         }
 
         if (!empty($peers_id_a_bannir)) {
-            $data = [
-                'mode' => 'kick',
-                'hash' => $hash,
-                'v' => $peers_id_a_bannir,
-            ];
-            $kicks = getCurl($url, $data, $login, $mdp);
-            echo  "kick torrent " . $torrent['d.get_name=']." ".implode(", ",$peers_id_a_bannir)."\n";
+            try {
+                getCurl($url, ['mode' => 'kick', 'hash' => $hash, 'v' => $peers_id_a_bannir], $login, $mdp);
+                echo "kick torrent " . $torrent['d.get_name='] . " " . implode(", ", $peers_id_a_bannir) . "\n";
+            } catch (Exception $e) {
+                echo "Warning: kick failed for " . $torrent['d.get_name='] . ": " . $e->getMessage() . "\n";
+            }
         }
     }
 }
-cleanCache();
 
-/**
- * @throws JsonException
- */
-function getCurl($url, $data, $login, $mdp): array
+// Clean stale entries (older than 24h) and save cache once
+foreach ($peersCache as $peerId => $peer) {
+    if (time() - $peer['date'] >= 86400) {
+        unset($peersCache[$peerId]);
+    }
+}
+saveCache($cacheFile, $peersCache);
+
+// --- Functions ---
+
+function getCurl(string $url, array $data, string $login, string $mdp): array
 {
     $posts = buildQuery($data);
-    $options = [
-        CURLOPT_URL => $url,
-        CURLOPT_RETURNTRANSFER => true,
-        CURLOPT_HTTPAUTH => CURLAUTH_DIGEST,
-        CURLOPT_USERPWD => "$login:$mdp",
-        CURLOPT_POSTFIELDS => $posts,
-        CURLOPT_POST => true,
-        CURLOPT_SSL_VERIFYPEER => true,
-        CURLOPT_HTTPHEADER => ['Content-Type: application/x-www-form-urlencoded']
-    ];
-
     $curl = curl_init();
-    curl_setopt_array($curl, $options);
+    curl_setopt_array($curl, [
+        CURLOPT_URL            => $url,
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_HTTPAUTH       => CURLAUTH_DIGEST,
+        CURLOPT_USERPWD        => "$login:$mdp",
+        CURLOPT_POSTFIELDS     => $posts,
+        CURLOPT_POST           => true,
+        CURLOPT_SSL_VERIFYPEER => true,
+        CURLOPT_HTTPHEADER     => ['Content-Type: application/x-www-form-urlencoded'],
+    ]);
+
     $response = curl_exec($curl);
+    $curlError = curl_error($curl);
+    $httpCode = curl_getinfo($curl, CURLINFO_HTTP_CODE);
     curl_close($curl);
 
     if ($response === false) {
-        echo 'Erreur Curl : ' . curl_error($curl);
-        return ['success' => false];
+        throw new RuntimeException("cURL error: $curlError");
+    }
+    if ($httpCode !== 200) {
+        throw new RuntimeException("HTTP $httpCode from rTorrent API");
     }
 
     return json_decode($response, true, 512, JSON_THROW_ON_ERROR);
 }
 
-/**
- * @throws JsonException
- */
-function getDataForPeer($peer): array
+function saveCache(string $cacheFile, array $peersCache): void
 {
-    global $cacheFile;
-    if (file_exists($cacheFile)) {
-        $peersData = json_decode(file_get_contents($cacheFile), true, 512, JSON_THROW_ON_ERROR);
-    } else {
-        $peersData = [];
-    }
-
-    return $peersData[$peer['id']] ?? [];
-}
-
-/**
- * @throws JsonException
- */
-function setDataForPeer($peer): void
-{
-    global $cacheFile;
-    if (file_exists($cacheFile)) {
-        $peersData = json_decode(file_get_contents($cacheFile), true, 512, JSON_THROW_ON_ERROR);
-    } else {
-        $peersData = [];
-    }
-
-    $peersData[$peer['id']] = $peer;
-    if (!isset($peersData[$peer['id']]["date"])) {
-        $peersData[$peer['id']]["date"] = time();
-    }
-
-    file_put_contents($cacheFile, json_encode($peersData, JSON_THROW_ON_ERROR));
-}
-
-/**
- * @throws JsonException
- */
-function cleanCache(): void
-{
-    global $cacheFile;
-    if (file_exists($cacheFile)) {
-        $peersData = json_decode(file_get_contents($cacheFile), true, 512, JSON_THROW_ON_ERROR);
-        foreach ($peersData as $peerId => $peer) {
-            if (time() - $peer['date'] >= 86400) {
-                unset($peersData[$peerId]);
-            }
-        }
-        file_put_contents($cacheFile, json_encode($peersData, JSON_THROW_ON_ERROR));
+    try {
+        file_put_contents($cacheFile, json_encode($peersCache, JSON_THROW_ON_ERROR));
+    } catch (JsonException $e) {
+        echo "Warning: could not save cache: " . $e->getMessage() . "\n";
     }
 }
 
-/**
- * @throws JsonException
- */
-function removeCache($peer): void
-{
-    global $cacheFile;
-    if (file_exists($cacheFile)) {
-        $peersData = json_decode(file_get_contents($cacheFile), true, 512, JSON_THROW_ON_ERROR);
-        if (isset($peersData[$peer["id"]])) {
-            unset($peersData[$peer["id"]]);
-        }
-        file_put_contents($cacheFile, json_encode($peersData, JSON_THROW_ON_ERROR));
-    }
-}
-
-function buildQuery($data): string
+function buildQuery(array $data): string
 {
     $queryParts = [];
     foreach ($data as $key => $value) {
@@ -324,11 +288,9 @@ function buildQuery($data): string
             $queryParts[] = urlencode($key) . '=' . urlencode($value);
         }
     }
-
     return implode('&', $queryParts);
 }
 
-// Fonction pour calculer la moyenne d'un tableau de nombres flottants
 function calculateAverage(array $numbers): float
 {
     if (empty($numbers)) {
